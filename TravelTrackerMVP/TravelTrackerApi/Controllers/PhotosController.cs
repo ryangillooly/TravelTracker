@@ -24,6 +24,12 @@ namespace TravelTrackerApi.Controllers
 
         // API key should be stored in the appsettings.json file
         private readonly string _googleMapsApiKey;
+        
+        // Cache for location data to reduce API calls
+        private static readonly Dictionary<string, (string City, string Country, DateTime CachedTime)> _locationCache = new();
+        private static readonly object _cacheLock = new();
+        private const double COORDINATE_PRECISION = 0.01; // Approximately 1km at the equator
+        private const int CACHE_EXPIRY_DAYS = 7;
 
         public PhotosController(AppDbContext context, ILogger<PhotosController> logger, 
             IHttpClientFactory httpClientFactory, IConfiguration configuration)
@@ -520,16 +526,35 @@ namespace TravelTrackerApi.Controllers
         {
             try
             {
+                // Check the cache first
+                string cacheKey = GetCacheKey(lat, lng);
+                
+                if (TryGetFromCache(cacheKey, out var cachedLocation))
+                {
+                    _logger.LogInformation("Location cache hit for coordinates {Lat}, {Long}", lat, lng);
+                    return cachedLocation;
+                }
+                
                 // First try Google Maps API
                 var (city, country) = await GetLocationFromGoogleMapsAsync(lat, lng);
                 
+                // Add successful result to cache
                 if (city != "Unknown" && country != "Unknown")
                 {
+                    AddToCache(cacheKey, (city, country));
                     return (city, country);
                 }
                 
                 // Fallback to simplified local geocoding if API fails
-                return GetLocationInfoSimplified(lat, lng);
+                var simplifiedResult = GetLocationInfoSimplified(lat, lng);
+                
+                // Add fallback result to cache only if it found something
+                if (simplifiedResult.City != "Unknown" || simplifiedResult.Country != "Unknown")
+                {
+                    AddToCache(cacheKey, simplifiedResult);
+                }
+                
+                return simplifiedResult;
             }
             catch (Exception ex)
             {
@@ -646,6 +671,16 @@ namespace TravelTrackerApi.Controllers
                         }
                         else if (isLocality && city == "Unknown" && component.TryGetProperty("long_name", out var cityName))
                         {
+                            if (cityName.GetString() == "Greenhithe")
+                            {
+                                city = cityName.GetString() ?? "Unknown";
+                            }
+                            
+                            if (cityName.GetString() == "St Albans")
+                            {
+                                city = cityName.GetString() ?? "Unknown";
+                            }
+                            
                             city = cityName.GetString() ?? "Unknown";
                         }
                     }
@@ -811,6 +846,89 @@ namespace TravelTrackerApi.Controllers
             {
                 _logger.LogError(ex, "Error testing geocoding");
                 return StatusCode(500, "An error occurred testing the geocoding service");
+            }
+        }
+
+        // Cache helper methods
+        private string GetCacheKey(double lat, double lng)
+        {
+            // Round coordinates to reduce precision and group nearby points
+            double roundedLat = Math.Round(lat / COORDINATE_PRECISION) * COORDINATE_PRECISION;
+            double roundedLng = Math.Round(lng / COORDINATE_PRECISION) * COORDINATE_PRECISION;
+            return $"{roundedLat}:{roundedLng}";
+        }
+        
+        private bool TryGetFromCache(string cacheKey, out (string City, string Country) location)
+        {
+            lock (_cacheLock)
+            {
+                if (_locationCache.TryGetValue(cacheKey, out var cachedData))
+                {
+                    // Check if cache entry is still valid
+                    if (cachedData.CachedTime > DateTime.Now.AddDays(-CACHE_EXPIRY_DAYS))
+                    {
+                        location = (cachedData.City, cachedData.Country);
+                        return true;
+                    }
+                    
+                    // Remove expired entry
+                    _locationCache.Remove(cacheKey);
+                }
+                
+                location = default;
+                return false;
+            }
+        }
+        
+        private void AddToCache(string cacheKey, (string City, string Country) location)
+        {
+            lock (_cacheLock)
+            {
+                _locationCache[cacheKey] = (location.City, location.Country, DateTime.Now);
+                
+                // Simple cache size management - if it gets too big, remove oldest entries
+                const int maxCacheSize = 1000;
+                if (_locationCache.Count > maxCacheSize)
+                {
+                    var oldestEntries = _locationCache
+                        .OrderBy(kvp => kvp.Value.CachedTime)
+                        .Take(_locationCache.Count - maxCacheSize)
+                        .Select(kvp => kvp.Key)
+                        .ToList();
+                        
+                    foreach (var key in oldestEntries)
+                    {
+                        _locationCache.Remove(key);
+                    }
+                }
+            }
+        }
+        
+        // Add API endpoint to inspect and clear the cache
+        [HttpGet("location-cache-stats")]
+        public IActionResult GetCacheStats()
+        {
+            lock (_cacheLock)
+            {
+                return Ok(new
+                {
+                    CacheSize = _locationCache.Count,
+                    OldestEntry = _locationCache.Any() ? _locationCache.Values.Min(v => v.CachedTime) : (DateTime?)null,
+                    NewestEntry = _locationCache.Any() ? _locationCache.Values.Max(v => v.CachedTime) : (DateTime?)null,
+                    CoordinatePrecision = COORDINATE_PRECISION,
+                    CacheExpiryDays = CACHE_EXPIRY_DAYS
+                });
+            }
+        }
+        
+        [HttpPost("clear-location-cache")]
+        public IActionResult ClearCache()
+        {
+            lock (_cacheLock)
+            {
+                int count = _locationCache.Count;
+                _locationCache.Clear();
+                return Ok(new { Message = $"Cleared {count} entries from location cache" });
             }
         }
     }
