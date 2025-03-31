@@ -167,6 +167,72 @@ namespace TravelTrackerApi.Controllers
                 return StatusCode(500, "An error occurred while retrieving clustered locations");
             }
         }
+        
+        [HttpGet("zoom-based-locations")]
+        public async Task<IActionResult> GetZoomBasedLocations([FromQuery] int? year = null, [FromQuery] int zoomLevel = 2)
+        {
+            try
+            {
+                IQueryable<Location> query = _context.Locations;
+
+                if (year.HasValue)
+                {
+                    query = query.Where(l => l.CaptureDate.Year == year.Value);
+                }
+
+                var locations = await query.ToListAsync();
+                
+                // Determine clustering strategy based on zoom level
+                if (zoomLevel <= 3) // World view
+                {
+                    return Ok(ClusterLocationsByCountry(locations));
+                }
+                else if (zoomLevel <= 6) // Continental/region view
+                {
+                    return Ok(ClusterLocationsByCity(locations));
+                }
+                else if (zoomLevel <= 10) // City view
+                {
+                    // Group by area within city (using more precise coordinates)
+                    return Ok(ClusterLocationsByArea(locations, 0.05)); // ~5km precision
+                }
+                else // Neighborhood view or higher zoom
+                {
+                    // Return individual pins (or cluster with high precision)
+                    return Ok(ClusterLocationsByArea(locations, 0.01)); // ~1km precision
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving zoom-based locations");
+                return StatusCode(500, "An error occurred while retrieving zoom-based locations");
+            }
+        }
+        
+        private List<ClusteredLocation> ClusterLocationsByArea(List<Location> locations, double precision)
+        {
+            // Group by coordinates rounded to the specified precision
+            var grouped = locations
+                .GroupBy(l => new { 
+                    Lat = Math.Round(l.Latitude / precision) * precision,
+                    Lng = Math.Round(l.Longitude / precision) * precision
+                })
+                .Select(g => new ClusteredLocation
+                {
+                    Id = $"area-{g.Key.Lat}-{g.Key.Lng}".Replace(".", "p"),
+                    Latitude = g.Average(l => l.Latitude),
+                    Longitude = g.Average(l => l.Longitude),
+                    Country = g.Count() == 1 ? g.First().Country : g.GroupBy(l => l.Country).OrderByDescending(x => x.Count()).First().Key,
+                    City = g.Count() == 1 ? g.First().City : g.GroupBy(l => l.City).OrderByDescending(x => x.Count()).First().Key,
+                    CaptureDate = g.Max(l => l.CaptureDate),
+                    Count = g.Count(),
+                    VisitDates = g.Select(l => l.CaptureDate).OrderByDescending(d => d).Take(10).ToList(),
+                    DetailLevel = "area"
+                })
+                .ToList();
+                
+            return grouped;
+        }
 
         private List<ClusteredLocation> ClusterLocationsByCity(List<Location> locations)
         {
@@ -189,7 +255,8 @@ namespace TravelTrackerApi.Controllers
                     CaptureDate = g.Max(l => l.CaptureDate),
                     Count = g.Count(),
                     // List of photo dates for this cluster
-                    VisitDates = g.Select(l => l.CaptureDate).OrderByDescending(d => d).Take(10).ToList()
+                    VisitDates = g.Select(l => l.CaptureDate).OrderByDescending(d => d).Take(10).ToList(),
+                    DetailLevel = "city"
                 })
                 .ToList();
 
@@ -205,7 +272,8 @@ namespace TravelTrackerApi.Controllers
                     City = "Unknown location",
                     CaptureDate = l.CaptureDate,
                     Count = 1,
-                    VisitDates = new List<DateTime> { l.CaptureDate }
+                    VisitDates = new List<DateTime> { l.CaptureDate },
+                    DetailLevel = "point"
                 });
 
             // Combine the results
@@ -233,7 +301,8 @@ namespace TravelTrackerApi.Controllers
                     City = $"{g.Select(l => l.City).Where(c => !string.IsNullOrEmpty(c) && c != "Unknown").Distinct().Count()} cities",
                     CaptureDate = g.Max(l => l.CaptureDate),
                     Count = g.Count(),
-                    VisitDates = g.Select(l => l.CaptureDate).OrderByDescending(d => d).Take(10).ToList()
+                    VisitDates = g.Select(l => l.CaptureDate).OrderByDescending(d => d).Take(10).ToList(),
+                    DetailLevel = "country"
                 })
                 .ToList();
 
@@ -249,7 +318,8 @@ namespace TravelTrackerApi.Controllers
                     City = l.City ?? "Unknown location",
                     CaptureDate = l.CaptureDate,
                     Count = 1,
-                    VisitDates = new List<DateTime> { l.CaptureDate }
+                    VisitDates = new List<DateTime> { l.CaptureDate },
+                    DetailLevel = "point"
                 });
 
             // Combine the results
@@ -286,5 +356,6 @@ namespace TravelTrackerApi.Controllers
         public DateTime CaptureDate { get; set; }
         public int Count { get; set; }
         public List<DateTime> VisitDates { get; set; }
+        public string DetailLevel { get; set; } = "unknown";
     }
 } 
