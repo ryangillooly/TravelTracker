@@ -633,6 +633,15 @@ main {
   box-shadow: none !important;
 }
 
+.tooltip-container {
+  background-color: white;
+  border-radius: 6px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.2);
+  max-width: 300px;
+  pointer-events: none;
+  z-index: 1000;
+}
+
 .country-tooltip {
   background-color: white;
   border-radius: 5px;

@@ -268,7 +268,23 @@ function UploadPage() {
                 <option value="12">12 months (1 year)</option>
                 <option value="24">24 months (2 years)</option>
                 <option value="36">36 months (3 years)</option>
+                <option value="48">48 months (4 years)</option>
                 <option value="60">60 months (5 years)</option>
+                <option value="72">72 months (6 years)</option>
+                <option value="84">84 months (7 years)</option>
+                <option value="96">96 months (8 years)</option>
+                <option value="108">108 months (9 years)</option>
+                <option value="120">120 months (10 years)</option>
+                <option value="132">132 months (11 years)</option>
+                <option value="144">144 months (12 years)</option>
+                <option value="156">156 months (13 years)</option>
+                <option value="168">168 months (14 years)</option>
+                <option value="180">180 months (15 years)</option>
+                <option value="192">192 months (16 years)</option>
+                <option value="204">204 months (17 years)</option>
+                <option value="216">216 months (18 years)</option>
+                <option value="228">228 months (19 years)</option>
+                <option value="240">240 months (20 years)</option>
               </select>
             </div>
             
