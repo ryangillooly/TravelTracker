@@ -6,6 +6,7 @@ import './App.css';
 import UploadPage from './components/UploadPage';
 import MapView from './components/MapView';
 import StatsView from './components/StatsView';
+import WorldMapView from './components/WorldMapView';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
               <li><Link to="/">Home</Link></li>
               <li><Link to="/upload">Upload Photos</Link></li>
               <li><Link to="/map">View Map</Link></li>
+              <li><Link to="/world-map">World Map</Link></li>
             </ul>
           </nav>
         </header>
@@ -27,6 +29,7 @@ function App() {
             <Route path="/" element={<StatsView />} />
             <Route path="/upload" element={<UploadPage />} />
             <Route path="/map" element={<MapView />} />
+            <Route path="/world-map" element={<WorldMapView />} />
           </Routes>
         </main>
       </div>
